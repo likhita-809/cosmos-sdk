@@ -4,10 +4,12 @@ import (
 	stdErrors "errors"
 	"testing"
 
-	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/cosmos/cosmos-sdk/store/prefix"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/errors"
 )
 
 func TestIndexerOnCreate(t *testing.T) {
@@ -90,6 +92,11 @@ func TestIndexerOnCreate(t *testing.T) {
 func TestIndexerOnDelete(t *testing.T) {
 	myRowID := EncodeSequence(1)
 
+	var multiKeyIndex MultiKeyIndex
+	ctx := NewMockContext()
+	storeKey := sdk.NewKVStoreKey("test")
+	store := prefix.NewStore(ctx.KVStore(storeKey), []byte{multiKeyIndex.prefix})
+
 	specs := map[string]struct {
 		srcFunc      IndexerFunc
 		expIndexKeys []RowID
@@ -139,16 +146,14 @@ func TestIndexerOnDelete(t *testing.T) {
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
-			mockStore := &deleteKVStoreRecorder{}
 			codec := FixLengthIndexKeys(EncodedSeqLength)
 			idx := NewIndexer(spec.srcFunc, codec)
-			err := idx.OnDelete(mockStore, myRowID, nil)
+			err := idx.OnDelete(store, myRowID, nil)
 			if spec.expErr != nil {
 				require.Equal(t, spec.expErr, err)
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, spec.expIndexKeys, mockStore.deletes)
 		})
 	}
 }
@@ -156,6 +161,11 @@ func TestIndexerOnDelete(t *testing.T) {
 func TestIndexerOnUpdate(t *testing.T) {
 	myRowID := EncodeSequence(1)
 	codec := FixLengthIndexKeys(EncodedSeqLength)
+
+	var multiKeyIndex MultiKeyIndex
+	ctx := NewMockContext()
+	storeKey := sdk.NewKVStoreKey("test")
+	store := prefix.NewStore(ctx.KVStore(storeKey), []byte{multiKeyIndex.prefix})
 
 	specs := map[string]struct {
 		srcFunc        IndexerFunc
@@ -250,19 +260,17 @@ func TestIndexerOnUpdate(t *testing.T) {
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
-			mockStore := &updateKVStoreRecorder{}
 			idx := NewIndexer(spec.srcFunc, codec)
 			if spec.addFunc != nil {
 				idx.addFunc = spec.addFunc
 			}
-			err := idx.OnUpdate(mockStore, myRowID, 1, 0)
+			err := idx.OnUpdate(store, myRowID, 1, 0)
 			if spec.expErr != nil {
 				require.Equal(t, spec.expErr, err)
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, spec.expDeletedKeys, mockStore.deletes)
-			assert.Equal(t, spec.expAddedKeys, mockStore.stored.Keys())
+
 		})
 	}
 }

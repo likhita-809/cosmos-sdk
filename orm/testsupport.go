@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/cosmos/cosmos-sdk/orm"
+	dbm "github.com/tendermint/tm-db"
+
 	"github.com/cosmos/cosmos-sdk/store"
 	"github.com/cosmos/cosmos-sdk/store/gaskv"
 	"github.com/cosmos/cosmos-sdk/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	dbm "github.com/tendermint/tm-db"
 )
 
 type MockContext struct {
@@ -57,6 +57,11 @@ func (d debuggingGasMeter) ConsumeGas(amount types.Gas, descriptor string) {
 	d.g.ConsumeGas(amount, descriptor)
 }
 
+func (d debuggingGasMeter) RefundGas(amount types.Gas, descriptor string) {
+	fmt.Printf("-- Refunding gas: %q :%d\n", descriptor, amount)
+	d.g.RefundGas(amount, descriptor)
+}
+
 func (d debuggingGasMeter) IsPastLimit() bool {
 	return d.g.IsPastLimit()
 }
@@ -65,15 +70,19 @@ func (d debuggingGasMeter) IsOutOfGas() bool {
 	return d.g.IsOutOfGas()
 }
 
+func (d debuggingGasMeter) String() string {
+	return d.g.String()
+}
+
 type GasCountingMockContext struct {
-	parent   orm.HasKVStore
+	parent   HasKVStore
 	GasMeter sdk.GasMeter
 }
 
-func NewGasCountingMockContext(parent orm.HasKVStore) *GasCountingMockContext {
+func NewGasCountingMockContext(parent HasKVStore) *GasCountingMockContext {
 	return &GasCountingMockContext{
 		parent:   parent,
-		GasMeter: &orm.debuggingGasMeter{sdk.NewInfiniteGasMeter()},
+		GasMeter: &debuggingGasMeter{sdk.NewInfiniteGasMeter()},
 	}
 }
 

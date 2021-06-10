@@ -1,78 +1,71 @@
-package orm
+package orm_test
 
 import (
 	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/orm"
 	"github.com/cosmos/cosmos-sdk/orm/testdata"
 	"github.com/cosmos/cosmos-sdk/store/prefix"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTypeSafeRowGetter(t *testing.T) {
 	storeKey := sdk.NewKVStoreKey("test")
-	ctx := NewMockContext()
+	ctx := orm.NewMockContext()
 	const prefixKey = 0x2
 	store := prefix.NewStore(ctx.KVStore(storeKey), []byte{prefixKey})
-	md := testdata.GroupMetadata{Description: "foo"}
+	md := testdata.GroupInfo{Description: "foo"}
 	bz, err := md.Marshal()
 	require.NoError(t, err)
-	store.Set(EncodeSequence(1), bz)
+	store.Set(orm.EncodeSequence(1), bz)
 
 	specs := map[string]struct {
-		srcRowID     RowID
+		srcRowID     orm.RowID
 		srcModelType reflect.Type
-		mutateDest   func(*testdata.GroupMetadata) Persistent
 		expObj       interface{}
 		expErr       *errors.Error
 	}{
 		"happy path": {
-			srcRowID:     EncodeSequence(1),
-			srcModelType: reflect.TypeOf(testdata.GroupMetadata{}),
-			expObj:       testdata.GroupMetadata{Description: "foo"},
+			srcRowID:     orm.EncodeSequence(1),
+			srcModelType: reflect.TypeOf(testdata.GroupInfo{}),
+			expObj:       testdata.GroupInfo{Description: "foo"},
 		},
 		"unknown rowID should return ErrNotFound": {
-			srcRowID:     EncodeSequence(999),
-			srcModelType: reflect.TypeOf(testdata.GroupMetadata{}),
-			expErr:       ErrNotFound,
+			srcRowID:     orm.EncodeSequence(999),
+			srcModelType: reflect.TypeOf(testdata.GroupInfo{}),
+			expErr:       orm.ErrNotFound,
 		},
 		"wrong type should cause ErrType": {
-			srcRowID:     EncodeSequence(1),
+			srcRowID:     orm.EncodeSequence(1),
 			srcModelType: reflect.TypeOf(testdata.GroupMember{}),
-			expErr:       ErrType,
+			expErr:       orm.ErrType,
 		},
 		"empty rowID not allowed": {
 			srcRowID:     []byte{},
-			srcModelType: reflect.TypeOf(testdata.GroupMetadata{}),
-			expErr:       ErrArgument,
+			srcModelType: reflect.TypeOf(testdata.GroupInfo{}),
+			expErr:       orm.ErrArgument,
 		},
 		"nil rowID not allowed": {
-			srcModelType: reflect.TypeOf(testdata.GroupMetadata{}),
-			expErr:       ErrArgument,
-		},
-		"target not a pointer": {
-			srcRowID:     EncodeSequence(1),
-			srcModelType: reflect.TypeOf(alwaysPanicPersistenceTarget{}),
-			mutateDest: func(m *testdata.GroupMetadata) Persistent {
-				return alwaysPanicPersistenceTarget{}
-			},
-			expErr: ErrType,
+			srcModelType: reflect.TypeOf(testdata.GroupInfo{}),
+			expErr:       orm.ErrArgument,
 		},
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
-			getter := NewTypeSafeRowGetter(storeKey, prefixKey, spec.srcModelType)
-			var loadedObj testdata.GroupMetadata
-			var dest Persistent
-			if spec.mutateDest != nil {
-				dest = spec.mutateDest(&loadedObj)
-			} else {
-				dest = &loadedObj
-			}
-			err := getter(ctx, spec.srcRowID, dest)
+			interfaceRegistry := types.NewInterfaceRegistry()
+			cdc := codec.NewProtoCodec(interfaceRegistry)
+
+			getter := orm.NewTypeSafeRowGetter(storeKey, prefixKey, spec.srcModelType, cdc)
+			var loadedObj testdata.GroupInfo
+
+			err := getter(ctx, spec.srcRowID, &loadedObj)
 			if spec.expErr != nil {
 				require.True(t, spec.expErr.Is(err), err)
 				return
@@ -81,18 +74,4 @@ func TestTypeSafeRowGetter(t *testing.T) {
 			assert.Equal(t, spec.expObj, loadedObj)
 		})
 	}
-}
-
-type alwaysPanicPersistenceTarget struct{}
-
-func (n alwaysPanicPersistenceTarget) Marshal() ([]byte, error) {
-	panic("implement me")
-}
-
-func (n alwaysPanicPersistenceTarget) Unmarshal([]byte) error {
-	panic("implement me")
-}
-
-func (n alwaysPanicPersistenceTarget) ValidateBasic() error {
-	panic("implement me")
 }

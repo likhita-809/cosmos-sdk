@@ -3,10 +3,12 @@ package orm
 import (
 	"bytes"
 
+	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/store/prefix"
 	"github.com/cosmos/cosmos-sdk/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/errors"
+	"github.com/cosmos/cosmos-sdk/types/query"
 )
 
 // indexer creates and modifies the second MultiKeyIndex based on the operations and changes on the primary object.
@@ -60,7 +62,7 @@ func newIndex(builder Indexable, prefix byte, indexer *Indexer) MultiKeyIndex {
 // Has checks if a key exists. Panics on nil key.
 func (i MultiKeyIndex) Has(ctx HasKVStore, key []byte) bool {
 	store := prefix.NewStore(ctx.KVStore(i.storeKey), []byte{i.prefix})
-	it := store.Iterator(prefixRange(key))
+	it := store.Iterator(PrefixRange(key))
 	defer it.Close()
 	return it.Valid()
 }
@@ -68,7 +70,21 @@ func (i MultiKeyIndex) Has(ctx HasKVStore, key []byte) bool {
 // Get returns a result iterator for the searchKey. Parameters must not be nil.
 func (i MultiKeyIndex) Get(ctx HasKVStore, searchKey []byte) (Iterator, error) {
 	store := prefix.NewStore(ctx.KVStore(i.storeKey), []byte{i.prefix})
-	it := store.Iterator(prefixRange(searchKey))
+	it := store.Iterator(PrefixRange(searchKey))
+	return indexIterator{ctx: ctx, it: it, rowGetter: i.rowGetter, keyCodec: i.indexKeyCodec}, nil
+}
+
+// GetPaginated creates an iterator for the searchKey
+// starting from pageRequest.Key if provided.
+// The pageRequest.Key is the rowID while searchKey is a MultiKeyIndex key.
+func (i MultiKeyIndex) GetPaginated(ctx HasKVStore, searchKey []byte, pageRequest *query.PageRequest) (Iterator, error) {
+	store := prefix.NewStore(ctx.KVStore(i.storeKey), []byte{i.prefix})
+	start, end := PrefixRange(searchKey)
+
+	if pageRequest != nil && len(pageRequest.Key) != 0 {
+		start = i.indexKeyCodec.BuildIndexKey(searchKey, RowID(pageRequest.Key))
+	}
+	it := store.Iterator(start, end)
 	return indexIterator{ctx: ctx, it: it, rowGetter: i.rowGetter, keyCodec: i.indexKeyCodec}, nil
 }
 
@@ -115,7 +131,7 @@ func (i MultiKeyIndex) ReversePrefixScan(ctx HasKVStore, start []byte, end []byt
 	return indexIterator{ctx: ctx, it: it, rowGetter: i.rowGetter, keyCodec: i.indexKeyCodec}, nil
 }
 
-func (i MultiKeyIndex) onSave(ctx HasKVStore, rowID RowID, newValue, oldValue Persistent) error {
+func (i MultiKeyIndex) onSave(ctx HasKVStore, rowID RowID, newValue, oldValue codec.ProtoMarshaler) error {
 	store := prefix.NewStore(ctx.KVStore(i.storeKey), []byte{i.prefix})
 	if oldValue == nil {
 		return i.indexer.OnCreate(store, rowID, newValue)
@@ -123,7 +139,7 @@ func (i MultiKeyIndex) onSave(ctx HasKVStore, rowID RowID, newValue, oldValue Pe
 	return i.indexer.OnUpdate(store, rowID, newValue, oldValue)
 }
 
-func (i MultiKeyIndex) onDelete(ctx HasKVStore, rowID RowID, oldValue Persistent) error {
+func (i MultiKeyIndex) onDelete(ctx HasKVStore, rowID RowID, oldValue codec.ProtoMarshaler) error {
 	store := prefix.NewStore(ctx.KVStore(i.storeKey), []byte{i.prefix})
 	return i.indexer.OnDelete(store, rowID, oldValue)
 }
@@ -150,7 +166,7 @@ type indexIterator struct {
 // LoadNext loads the next value in the sequence into the pointer passed as dest and returns the key. If there
 // are no more items the ErrIteratorDone error is returned
 // The key is the rowID and not any MultiKeyIndex key.
-func (i indexIterator) LoadNext(dest Persistent) (RowID, error) {
+func (i indexIterator) LoadNext(dest codec.ProtoMarshaler) (RowID, error) {
 	if !i.it.Valid() {
 		return nil, ErrIteratorDone
 	}
@@ -166,7 +182,7 @@ func (i indexIterator) Close() error {
 	return nil
 }
 
-// prefixRange turns a prefix into a (start, end) range. The start is the given prefix value and
+// PrefixRange turns a prefix into a (start, end) range. The start is the given prefix value and
 // the end is calculated by adding 1 bit to the start value. Nil is not allowed as prefix.
 // 		Example: []byte{1, 3, 4} becomes []byte{1, 3, 5}
 // 				 []byte{15, 42, 255, 255} becomes []byte{15, 43, 0, 0}
@@ -174,7 +190,7 @@ func (i indexIterator) Close() error {
 // In case of an overflow the end is set to nil.
 //		Example: []byte{255, 255, 255, 255} becomes nil
 //
-func prefixRange(prefix []byte) ([]byte, []byte) {
+func PrefixRange(prefix []byte) ([]byte, []byte) {
 	if prefix == nil {
 		panic("nil key not allowed")
 	}

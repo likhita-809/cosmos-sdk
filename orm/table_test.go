@@ -4,21 +4,24 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/cosmos/cosmos-sdk/codec"
+	"github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/orm"
 	"github.com/cosmos/cosmos-sdk/orm/testdata"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestCreate(t *testing.T) {
 	specs := map[string]struct {
-		src    orm.Persistent
+		src    codec.ProtoMarshaler
 		expErr *errors.Error
 	}{
 		"happy path": {
-			src: &testdata.GroupMetadata{
+			src: &testdata.GroupInfo{
 				Description: "my group",
 				Admin:       sdk.AccAddress([]byte("my-admin-address")),
 			},
@@ -32,15 +35,18 @@ func TestCreate(t *testing.T) {
 			expErr: orm.ErrType,
 		},
 		"model validation fails": {
-			src:    &testdata.GroupMetadata{Description: "invalid"},
+			src:    &testdata.GroupInfo{Description: "invalid"},
 			expErr: testdata.ErrTest,
 		},
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
+			interfaceRegistry := types.NewInterfaceRegistry()
+			cdc := codec.NewProtoCodec(interfaceRegistry)
+
 			storeKey := sdk.NewKVStoreKey("test")
 			const anyPrefix = 0x10
-			tableBuilder := orm.NewTableBuilder(anyPrefix, storeKey, &testdata.GroupMetadata{}, orm.Max255DynamicLengthIndexKeyCodec{})
+			tableBuilder := orm.NewTableBuilder(anyPrefix, storeKey, &testdata.GroupInfo{}, orm.Max255DynamicLengthIndexKeyCodec{}, cdc)
 			myTable := tableBuilder.Build()
 
 			ctx := orm.NewMockContext()
@@ -51,7 +57,7 @@ func TestCreate(t *testing.T) {
 			assert.Equal(t, shouldExists, myTable.Has(ctx, []byte("my-id")), fmt.Sprintf("expected %v", shouldExists))
 
 			// then
-			var loaded testdata.GroupMetadata
+			var loaded testdata.GroupInfo
 			err = myTable.GetOne(ctx, []byte("my-id"), &loaded)
 			if spec.expErr != nil {
 				require.True(t, orm.ErrNotFound.Is(err))
@@ -65,11 +71,11 @@ func TestCreate(t *testing.T) {
 }
 func TestUpdate(t *testing.T) {
 	specs := map[string]struct {
-		src    orm.Persistent
+		src    codec.ProtoMarshaler
 		expErr *errors.Error
 	}{
 		"happy path": {
-			src: &testdata.GroupMetadata{
+			src: &testdata.GroupInfo{
 				Description: "my group",
 				Admin:       sdk.AccAddress([]byte("my-admin-address")),
 			},
@@ -83,18 +89,21 @@ func TestUpdate(t *testing.T) {
 			expErr: orm.ErrType,
 		},
 		"model validation fails": {
-			src:    &testdata.GroupMetadata{Description: "invalid"},
+			src:    &testdata.GroupInfo{Description: "invalid"},
 			expErr: testdata.ErrTest,
 		},
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
+			interfaceRegistry := types.NewInterfaceRegistry()
+			cdc := codec.NewProtoCodec(interfaceRegistry)
+
 			storeKey := sdk.NewKVStoreKey("test")
 			const anyPrefix = 0x10
-			tableBuilder := orm.NewTableBuilder(anyPrefix, storeKey, &testdata.GroupMetadata{}, orm.Max255DynamicLengthIndexKeyCodec{})
+			tableBuilder := orm.NewTableBuilder(anyPrefix, storeKey, &testdata.GroupInfo{}, orm.Max255DynamicLengthIndexKeyCodec{}, cdc)
 			myTable := tableBuilder.Build()
 
-			initValue := testdata.GroupMetadata{
+			initValue := testdata.GroupInfo{
 				Description: "my old group description",
 				Admin:       sdk.AccAddress([]byte("my-old-admin-address")),
 			}
@@ -107,7 +116,7 @@ func TestUpdate(t *testing.T) {
 			require.True(t, spec.expErr.Is(err), "got ", err)
 
 			// then
-			var loaded testdata.GroupMetadata
+			var loaded testdata.GroupInfo
 			require.NoError(t, myTable.GetOne(ctx, []byte("my-id"), &loaded))
 			if spec.expErr == nil {
 				assert.Equal(t, spec.src, &loaded)

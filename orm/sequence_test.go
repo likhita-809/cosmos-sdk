@@ -3,8 +3,9 @@ package orm
 import (
 	"testing"
 
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/assert"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 func TestSequenceIncrements(t *testing.T) {
